@@ -16,7 +16,7 @@
  *
  * SPDX-License-Identifier: LGPL-2.1
  */
-
+// ma modif
 /**
  * @brief  This file it the main entry point of the
  *         OwnTech Power API. Please check the OwnTech
