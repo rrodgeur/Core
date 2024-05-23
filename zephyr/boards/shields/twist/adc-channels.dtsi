@@ -42,12 +42,12 @@
 			channel-name = "V_HIGH";
 			default-gain = <0x3cf57710>;
 			default-offset = <0x00000000>;
-			spin-pin = <27>;
+			spin-pin = <26>;
 			v-high-adc1 {
-				io-channels = <&adc1 9>;
+				io-channels = <&adc1 8>;
 			};
 			v-high-adc2 {
-				io-channels = <&adc2 9>;
+				io-channels = <&adc2 8>;
 			};
 		};
 
@@ -86,12 +86,12 @@
 			channel-name = "I_HIGH";
 			default-gain = <0x3ba3d70a>;
 			default-offset = <0xc1200000>;
-			spin-pin = <26>;
+			spin-pin = <27>;
 			i-high-adc1 {
-				io-channels = <&adc1 8>;
+				io-channels = <&adc1 9>;
 			};
 			i-high-adc2 {
-				io-channels = <&adc2 8>;
+				io-channels = <&adc2 9>;
 			};
 		};
 
