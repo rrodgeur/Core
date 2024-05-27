@@ -66,6 +66,9 @@ static float32_t V1_low_value;
 static float32_t V2_low_value;
 static float32_t I1_low_value;
 static float32_t I2_low_value;
+static three_phase_t Iabc_ref;
+static float32_t Ia_ref;
+
 // static float32_t V3_low_value;
 // static float32_t I3_low_value;
 // dc meas
@@ -86,23 +89,26 @@ static float32_t Id_meas, Iq_meas;
 static float32_t Id_ref, Iq_ref;
 static float32_t Vd, Vq;
 
+static float32_t k_calage = 11.0;
 static float32_t AngleTab_rad[] = 
 {
     -1,
-     60.0 * PI / 180.0, 
-    300.0 * PI / 180.0,
-      0.0 * PI / 180.0,
-    180.0 * PI / 180.0,
+    240.0 * PI / 180.0, 
     120.0 * PI / 180.0,
-    240.0 * PI / 180.0
+    180.0 * PI / 180.0,
+      0.0 * PI / 180.0,
+    300.0 * PI / 180.0,
+     60.0 * PI / 180.0
 };
 
 static float32_t Ts = 100.e-6F;
 static uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
 
-static PllAngle pllangle = controlLibFactory.pllAngle(Ts, 10.0F, 0.05F);
+static float32_t f0_target;
+static PllAngle pllangle = controlLibFactory.pllAngle(Ts, 10.0F, 0.01F);
 static PllDatas pllDatas;
 static float32_t angle_filtered;
+static float32_t angle_4_control;
 static float32_t w_ref;
 static float32_t w_ref_filtered;
 static float32_t w_meas;
@@ -134,7 +140,7 @@ static Pid pi_speed = controlLibFactory.pid(Ts, Kp_speed, Ti_speed, Td, N, lower
 // 45 pair of poles
 // 1 wheel of 26 inches (1 inch = 2.54cm)
 const float32_t to_kmh = 0.02641;
-const static uint32_t decimation = 30;
+const static uint32_t decimation = 3;
 static uint32_t counter_time;
 uint8_t received_serial_char;
 enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
@@ -205,7 +211,6 @@ void setup_routine()
     data.enableTwistDefaultChannels(); 
     data.setParameters(I1_LOW, 0.0051, -10.438);
     data.setParameters(I2_LOW, 0.0049, -9.9797);
-
     spin.gpio.configurePin(HALL1, INPUT);
     spin.gpio.configurePin(HALL2, INPUT);
     spin.gpio.configurePin(HALL3, INPUT);
@@ -214,13 +219,14 @@ void setup_routine()
     scope.connectChannel(I2_low_value, "ILow2");
     scope.connectChannel(Va, "Va");
     scope.connectChannel(Vq, "Vq");
-    scope.connectChannel(Vd, "Vd");
-    scope.connectChannel(duty_a, "duty_a");
+    scope.connectChannel(Ia_ref, "Ia_ref");
+    scope.connectChannel(hall_angle, "hall_angle");
     scope.connectChannel(angle_filtered, "angle");
-    scope.connectChannel(w_meas, "w_meas");
     scope.connectChannel(Iq_ref, "Iq_ref");
-    scope.connectChannel(w_ref_filtered, "w_ref");
     scope.connectChannel(Iq_meas, "Iq");
+    scope.connectChannel(angle_index_f, "angle_index");
+    scope.connectChannel(w_meas, "w_meas");
+    // scope.connectChannel(w_ref_filtered, "w_ref");
 
     scope.set_trigger(&mytrigger);
     scope.set_delay(0.0);
@@ -268,7 +274,7 @@ void loop_background_task()
         case 'i':
             printk("idle asked");
             mode = IDLEMODE;
-            manual_Iq_ref = 0.0;
+            // manual_Iq_ref = 0.0;
             manual_w_ref = 0.0;
             // reset scope.
             scope.start();
@@ -286,8 +292,8 @@ void loop_background_task()
                 manual_w_ref += 10.0F;
                 if (manual_w_ref > 1000.0F) manual_w_ref = 1000.0F;
             } else {
-                manual_Iq_ref += 0.025F;
-                if (manual_Iq_ref > 2.0F) manual_Iq_ref = 2.0F;
+                manual_Iq_ref += 0.25F;
+                if (manual_Iq_ref > 4.0F) manual_Iq_ref = 4.0F;
             }
         break;
         case 'd':
@@ -296,13 +302,20 @@ void loop_background_task()
                 if (manual_w_ref < 0.0F) manual_w_ref = 00.0F;
             }
             else {
-                manual_Iq_ref -= 0.025;
-                if (manual_Iq_ref < 0.0) manual_Iq_ref = 0.0;
+                manual_Iq_ref -= 0.25;
+                if (manual_Iq_ref < -4.0) manual_Iq_ref = -4.0;
             }
         break;
         case 'r':
             is_downloading = true;
         break;
+        case 'j':
+            k_calage += 1.0;
+        break;
+        case 'k':
+            k_calage -= 1.0;
+        break;
+
     }
 
     // Pause between two runs of the task
@@ -313,13 +326,19 @@ void loop_background_task()
     // data.retrieveParametersFromMemory()
 
 
-    printk("%.2f:", I_high);
-    printk("%.2f:", V_high);
-    printk("%.2f:", V_high_filtered);
-    printk("%d:", angle_index);
+    // printk("%.2f:", f0_target);
+    // printk("%.2f:", I_high);
+    // printk("%.2f:", V_high);
+    // printk("%.2f:", V_high_filtered);
+    // printk("%d:", angle_index);
+    // printk("%f:", manual_Iq_ref);
+    // printk("%f:", manual_w_ref);
+    // printk("%d:", regulation_mode);
+    printk("%d:", HALL1_value);
+    printk("%d:", HALL2_value);
+    printk("%d:", HALL3_value);
+    printk("%.2f:", k_calage);
     printk("%f:", manual_Iq_ref);
-    printk("%f:", manual_w_ref);
-    printk("%d:", regulation_mode);
     printk("%d\n", mode);
 
     if (is_downloading) {
@@ -377,10 +396,12 @@ void loop_critical_task()
     angle_index = HALL3_value*4 + HALL2_value*2 + HALL1_value*1;
 
     angle_index_f = (float32_t) angle_index;
-    hall_angle = ot_modulo_2pi(AngleTab_rad[angle_index] + PI * 8.0 / 12.0);
+    hall_angle = ot_modulo_2pi(AngleTab_rad[angle_index] + PI * k_calage / 12.0);
     pllDatas = pllangle.calculateWithReturn(hall_angle);
     // DEBUG
     angle_filtered = pllDatas.angle;
+    // angle_filtered = ot_modulo_2pi(angle_filtered +  Ts * 2.0 * PI * f0_target);
+    angle_4_control = angle_filtered;
     if (I1_low_value > CURRENT_LIMIT || I1_low_value < -CURRENT_LIMIT || I2_low_value > CURRENT_LIMIT || I2_low_value < -CURRENT_LIMIT) {
         mode = ERRORMODE;
     }
@@ -413,7 +434,9 @@ void loop_critical_task()
         Iabc.a = -I1_low_value; // FIXME:WHY ??
         Iabc.b = -I2_low_value; // FIXME:WHY ??
         Iabc.c = -(I1_low_value + I2_low_value);
-        Idq = Transform::to_dqo(Iabc, angle_filtered);
+        Idq = Transform::to_dqo(Iabc, angle_4_control);
+        Iabc_ref = Transform::to_threephase(Idq_ref, angle_4_control);
+        Ia_ref = Iabc_ref.a;
         Id_ref = Idq_ref.d;
         Iq_ref = Idq_ref.q;
         Idq_ref.o = 0.0F;
@@ -422,7 +445,7 @@ void loop_critical_task()
         Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
         Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
         Vdq.o = 0.0F;
-        Vabc = Transform::to_threephase(Vdq, angle_filtered);
+        Vabc = Transform::to_threephase(Vdq, angle_4_control);
         Vd = Vdq.d;
         Vq = Vdq.q;
         Va = Vabc.a;
