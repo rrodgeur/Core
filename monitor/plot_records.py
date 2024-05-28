@@ -18,13 +18,17 @@ def to_dataFrame(filename):
     if idx:
         datas = np.roll(datas,  -(idx+1), axis=0)
     df = pd.DataFrame(datas, columns=names[:-1])
+    # remove last row (BUG TO CORRECT)
+    df = df[:-1]
     return df
 
 def plot_df(df):
     fig, axs = plt.subplots(3, 1)
     tics = np.arange(len(df))
     try:
-        df['V_Low_estim'] = df['duty_cycle']*df['V_high']
+        pass
+        # df['V_Low_estim'] = df['duty_cycle']*df['V_high']
+        # df['w_estimate'] = df['w_estimate'] * 100e-6
     except:
         pass
     # if 'k_acquire' in df:
