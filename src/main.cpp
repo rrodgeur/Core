@@ -51,93 +51,78 @@ void application_task();
 #define HALL2 PD2
 #define HALL3 PC6
 
-static const float32_t V_HIGH_MIN = 10.0;
-const gpio_flags_t INPUT_PULLDOWN = GPIO_INPUT | GPIO_PULL_DOWN;
+static float32_t Ts = 100.e-6F;
+static uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
+static const float32_t V_HIGH_MIN = 5.0;
 
 // Hall effect sensors
 static uint8_t HALL1_value;
 static uint8_t HALL2_value;
 static uint8_t HALL3_value;
-static uint8_t direction_A3;
-static float32_t direction_A3_f;
 static uint8_t angle_index;
 static float32_t angle_index_f;
 static float32_t hall_angle;
+static PllAngle pllangle = controlLibFactory.pllAngle(Ts, 10.0F, 0.03F);
+static PllAngle pll_ab = controlLibFactory.pllAngle(Ts, 10.0F, 0.08F);
+static PllDatas pllDatas;
+static float32_t angle_filtered;
+static float32_t w_meas;
+static int16_t sector[] = {-1, 4, 2, 3, 0, 5, 1};
+static float32_t sector_f;
+static float32_t k_calage = 11.0;
 
 // LEG meas
 static float32_t meas_data;
-static float32_t V1_low_value;
-static float32_t V2_low_value;
 static float32_t I1_low_value;
 static float32_t I2_low_value;
-static float32_t old_I2_low;
-static float32_t old_I1_low;
-static three_phase_t Iabc_ref;
-static float32_t Ia_ref;
+static float32_t I1_offset;
+static float32_t I2_offset;
+static float32_t tmpI1_offset;
+static float32_t tmpI2_offset;
+static float32_t nb_offset;
 
-// static float32_t V3_low_value;
-// static float32_t I3_low_value;
 // dc meas
 static float32_t I_high;
 static float32_t V_high;
 static float32_t Tq_meas;
-static float32_t Tq_meas2;
 static float32_t k_tq;
 
+// AB index
+static float32_t ab_sector[] = {0.F, 1.F, 3.F, 2.F};
+static uint8_t PA2_value;
+static uint8_t PA3_value;
+static float32_t ab_value;
+static float32_t ab_pulsation;
+static float32_t ab_angle;
+static PllDatas ab_pll_datas;
 
 static three_phase_t Vabc;
 static three_phase_t duty_abc;
+static float32_t duty_ramp = 0.1;
 static three_phase_t Iabc;
 static dqo_t Vdq;
 static dqo_t Idq;
 static dqo_t Idq_ref;
-
-static float32_t Va, Vb;
+// static float32_t comp_dt = 0.01;
 static float32_t duty_a, duty_b;
-static float32_t Id_meas, Iq_meas;
-static float32_t Id_ref, Iq_ref;
-static float32_t Vd, Vq;
-
-static float32_t k_calage = 11.0;
-static float32_t k_durete = 1.0;
-// static float32_t AngleTab_rad[] = 
-// {
-//     -1,
-//     240.0 * PI / 180.0, 
-//     120.0 * PI / 180.0,
-//     180.0 * PI / 180.0,
-//       0.0 * PI / 180.0,
-//     300.0 * PI / 180.0,
-//      60.0 * PI / 180.0 
-// };
-
-static int16_t sector[] = {-1, 4, 2, 3, 0, 5, 1};
-static float32_t sector_f;
-static float32_t Ts = 100.e-6F;
-static uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
-
-static PllAngle pllangle = controlLibFactory.pllAngle(Ts, 10.0F, 0.02F);
-static PllDatas pllDatas;
-static float32_t angle_filtered;
+static float32_t Va;
+static float32_t Iq_meas;
+static float32_t Iq_ref;
 static float32_t angle_4_control;
-static float32_t w_ref;
-static float32_t w_ref_filtered;
-static float32_t w_meas;
-static float32_t manual_Iq_ref;
-static float32_t manual_w_ref;
-static float32_t speed_regul_Iq_ref;
+static float32_t manual_Iq_ref = 0.0;
 
 static LowPassFirstOrderFilter w_ref_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter vHigh_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter w_mes_filter = controlLibFactory.lowpassfilter(Ts, 1.0e-3F);
 static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
+static LowPassFirstOrderFilter ab_pulse_filter = controlLibFactory.lowpassfilter(Ts, 100.0e-3F);
 static float32_t V_high_filtered;
 static float32_t inverse_Vhigh;
 //--- PID ---
 // static float32_t Kp = 30*0.035;
 // static float32_t Ti = 0.001029;
-static float32_t Kp = 60*0.035;
-static float32_t Ti = 0.0008029;
+static float32_t Kp = 15*0.035;
+static float32_t Ti = 0.005029;
 static float32_t Td = 0.0;
 static float32_t N = 1.0;
 static float32_t lower_bound = -30.0;
@@ -154,8 +139,9 @@ static Pid pi_speed = controlLibFactory.pid(Ts, Kp_speed, Ti_speed, Td, N, lower
 // 45 pair of poles
 // 1 wheel of 26 inches (1 inch = 2.54cm)
 const float32_t to_kmh = 0.02641;
-const static uint32_t decimation = 1;
+const static uint32_t decimation = 10;
 static uint32_t counter_time;
+
 static float32_t w_estimate;
 uint8_t received_serial_char;
 enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
@@ -165,35 +151,40 @@ enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVER
     ERRORMODE = 2
 };
 
-static const float32_t CURRENT_LIMIT = 10.0;
-static bool pwm_enable;
+enum control_state_mode {
+    OFFSET_ST = 0,
+    IDLE_ST = 1,
+    STARTUP_ST = 2,
+    POWER_ST = 3,
+    ERROR_ST = 4
 
-enum regulation_mode_enum {
-    TORQUE = 0,
-    SPEED = 1
 };
 
-uint8_t mode = IDLEMODE;
-enum regulation_mode_enum regulation_mode = TORQUE;
+enum control_state_mode control_state;
+
+static const float32_t AC_CURRENT_LIMIT = 10.0;
+static const float32_t DC_CURRENT_LIMIT = 5.0;
+static uint16_t error_counter;
+static bool pwm_enable;
+uint8_t asked_mode = IDLEMODE;
 
 void init_filt_and_reg(void) {
     pllangle.reset(0.F);
+    pll_ab.reset(ab_value);
     vHigh_filter.reset(V_HIGH_MIN);
     w_ref_filter.reset(0.0);
     tq_mes_filter.reset(1500.0);
     pi_d.reset();
     pi_q.reset();
     pi_speed.reset();
+    error_counter = 0;
 }
 
-ScopeMimicry scope(512, 10);
+ScopeMimicry scope(512, 9);
 static bool is_downloading;
 bool mytrigger() {
-    // if (w_estimate > 100.0) return true;
-    if (Idq_ref.q > 0.05) return true;
-    return false;
+    return ((ab_pulsation > 2.0 || ab_pulsation < -2.0) && control_state == POWER_ST);
 }
-
 void dump_scope_datas(ScopeMimicry &scope)  {
     uint8_t *buffer = scope.get_buffer();
     uint16_t buffer_size = scope.get_buffer_size() >> 2; // we divide by 4 (4 bytes per float data) 
@@ -203,13 +194,13 @@ void dump_scope_datas(ScopeMimicry &scope)  {
         printk("%s,", scope.get_channel_name(k));
     }
     printk("\n");
+    printk("# %d\n", scope.get_final_idx());
     for (uint16_t k=0;k < buffer_size; k++) {
         printk("%08x\n", *((uint32_t *)buffer + k));
         task.suspendBackgroundUs(100);
     }
     printk("end record\n");
 }
-
 /* 
  * pulsation_estimator(sector, time)
  *
@@ -238,8 +229,20 @@ float32_t pulsation_estimator(int16_t sector, float32_t time) {
     }
     return w_estimate_intern;
 }
-
-
+static __inline__ float32_t dead_time_comp(float32_t I, float32_t comp_value)
+{
+    float32_t dt;
+    dt = comp_value * I;
+    if (dt > comp_value) 
+    {
+        dt = comp_value;
+    } 
+    else if (I < -comp_value)
+    {
+        dt = -comp_value;
+    }
+    return dt;
+}
 void config_adcs() {
     spin.adc.configureTriggerSource(1, hrtim_ev1);
     spin.adc.configureTriggerSource(2, hrtim_ev3);
@@ -259,7 +262,6 @@ void config_adcs() {
     data.enableShieldChannel(2, ANALOG_COS);
 }
 //--------------SETUP FUNCTIONS-------------------------------
-
 /**
  * This is the setup routine.
  * It is used to call functions that will initialize your spin, twist, data and/or tasks.
@@ -271,30 +273,28 @@ void setup_routine()
     // Setup the hardware first
     // spin.version.setBoardVersion(TWIST_v_1_1_3);
     twist.setVersion(shield_ownverter);
-
     twist.initAllBuck();
-
-    // data.enableTwistDefaultChannels(); 
     config_adcs();
-    data.setParameters(I1_LOW, 0.0051, -10.438);
-    data.setParameters(I2_LOW, 0.0049, -9.9797);
+    data.setParameters(I1_LOW, 0.005, -10);
+    data.setParameters(I2_LOW, 0.005, -10.0);
+    data.setParameters(I_HIGH, 0.005, -10.0);
+    data.setParameters(V_HIGH, 0.0666, 0.0);
+
     spin.gpio.configurePin(HALL1, INPUT);
     spin.gpio.configurePin(HALL2, INPUT);
     spin.gpio.configurePin(HALL3, INPUT);
     spin.gpio.configurePin(PA3, INPUT);
+    spin.gpio.configurePin(PA2, INPUT);
 
-    scope.connectChannel(I_high, "I_high");
-    scope.connectChannel(sector_f, "sector_f");
-    scope.connectChannel(angle_filtered, "angle");
-    scope.connectChannel(Iq_ref, "Iq_ref");
-    scope.connectChannel(Iq_meas, "Iq");
-    scope.connectChannel(angle_index_f, "angle_index");
-    scope.connectChannel(w_meas, "V_w_meas");
-    scope.connectChannel(w_estimate, "V_w_estimate");
-    scope.connectChannel(Vq, "Vq");
-    scope.connectChannel(Tq_meas2, "V_Tq_meas");
-    // scope.connectChannel(w_ref_filtered, "w_ref");
-
+    scope.connectChannel(V_high, "V_high");
+    scope.connectChannel(V_high_filtered, "V_high_filt");
+    scope.connectChannel(ab_value, "ab_value");
+    scope.connectChannel(ab_pulsation, "V_ab_pulse");
+    scope.connectChannel(ab_angle, "ab_angle");
+    scope.connectChannel(Iq_ref, "I_qref");
+    scope.connectChannel(Iq_meas, "I_qmeas");
+    scope.connectChannel(angle_filtered, "angle_filtered");
+    scope.connectChannel(hall_angle, "hall_angle");
     scope.set_trigger(&mytrigger);
     scope.set_delay(0.0);
     scope.start();
@@ -304,22 +304,26 @@ void setup_routine()
     I2_low_value = 0.0;
     I_high = 0.0;
     V_high = 0.0;
-
     pwm_enable = false;
-    mode = IDLEMODE;
+    asked_mode = IDLEMODE;
+    control_state = OFFSET_ST;
+    I1_offset = 0.0;
+    I2_offset = 0.0;
+    tmpI1_offset = 0.0;
+    tmpI2_offset = 0.0;
+    k_tq = 3.0;
+    nb_offset = 2000;
+    spin.led.turnOn();
     // Then declare tasks
     uint32_t background_task_number = task.createBackground(loop_background_task);
     uint32_t app_task_number = task.createBackground(application_task);
     task.createCritical(loop_critical_task, control_task_period); // Uncomment if you use the critical task
-
     // Finally, start tasks
     task.startBackground(background_task_number);
     task.startBackground(app_task_number);
     task.startCritical(); // Uncomment if you use the critical task
 }
-
 //--------------LOOP FUNCTIONS--------------------------------
-
 /**
  * This is the code loop of the background task
  * It is executed second as defined by it suspend task in its last line.
@@ -335,75 +339,37 @@ void loop_background_task()
         break;
         case 'p':
             printk("power asked");
-            mode = POWERMODE;
+            asked_mode = POWERMODE;
             scope.start();
         break;
         case 'i':
             printk("idle asked");
-            mode = IDLEMODE;
-            // manual_Iq_ref = 0.0;
-            manual_w_ref = 0.0;
-            // reset scope.
-            scope.start();
-        break;
-        case 't':
-            printk("TORQUE mode asked\n");
-            regulation_mode = TORQUE;
-        break;
-        case 's':
-            printk("SPEED mode asked\n");
-            regulation_mode = SPEED;
-        break;
-        case 'u':
-            if (regulation_mode == SPEED) {
-                manual_w_ref += 10.0F;
-                if (manual_w_ref > 1000.0F) manual_w_ref = 1000.0F;
-            } else {
-                manual_Iq_ref += 0.25F;
-                if (manual_Iq_ref > 4.0F) manual_Iq_ref = 4.0F;
-            }
-        break;
-        case 'd':
-            if (regulation_mode == SPEED) {
-                manual_w_ref -= 10.0F;
-                if (manual_w_ref < 0.0F) manual_w_ref = 00.0F;
-            }
-            else {
-                manual_Iq_ref -= 0.25;
-                if (manual_Iq_ref < -4.0) manual_Iq_ref = -4.0;
-            }
+            asked_mode = IDLEMODE;
         break;
         case 'r':
             is_downloading = true;
-        break;
-        case 'j':
-            // k_calage += 1.0;
-            // k_durete += .25;
-            k_tq += .25;
-        break;
-        case 'k':
-            // k_calage -= 1.0;
-            // k_durete -= .25;
-            k_tq -= .25;
-        break;
-
+        case 'u':
+            k_tq += 1.0F;
+            break;
+        case 'd':
+            k_tq -= 1.0F;
+            break;
     }
 
     // Pause between two runs of the task
 }
+void application_task() {
 
-    void application_task() {
-
-    // data.retrieveParametersFromMemory()
-
-
-    // printk("%.2f:", f0_target);
     printk("%.2f:", I_high);
-    printk("%.2f:", V_high);
-    printk("%.2f:", Tq_meas);
-    printk("%.2f:", Tq_meas2);
-    printk("%.2f:", k_tq);
-    printk("%d\n", mode);
+    printk("%.2f:", V_high_filtered);
+    printk("%.2f:", Tq_meas-1500);
+    printk("%.2f:", ab_pulsation);
+    printk("%.2f:", w_estimate);
+    printk("%.2f:", Iq_ref);
+    printk("%d:", scope.has_trigged());
+    printk("%.2f:", ab_value);
+    printk("%.0f:", k_tq);
+    printk("%d\n", control_state);
 
     if (is_downloading) {
         dump_scope_datas(scope);
@@ -412,9 +378,6 @@ void loop_background_task()
 
     task.suspendBackgroundMs(250);
 }
-
-
-
 /**
  * This is the code loop of the critical task
  * It is executed every 500 micro-seconds defined in the setup_software function.
@@ -425,39 +388,42 @@ void loop_critical_task()
 {
     counter_time++;
     meas_data = data.getLatest(I1_LOW);
-    if (meas_data != NO_VALUE) I1_low_value = meas_data;
+    if (meas_data != NO_VALUE) I1_low_value = meas_data + I1_offset;
 
     meas_data = data.getLatest(I2_LOW);
-    if (meas_data != NO_VALUE) I2_low_value = meas_data;
+    if (meas_data != NO_VALUE) I2_low_value = meas_data + I2_offset;
+
+    if (control_state == OFFSET_ST && counter_time < 2000) {
+        tmpI1_offset += I1_low_value; 
+        tmpI2_offset += I2_low_value; 
+    }
 
     meas_data = data.getLatest(V_HIGH);
     if (meas_data != NO_VALUE) V_high = meas_data;
 
     meas_data = data.getLatest(I_HIGH);
-    if (meas_data != NO_VALUE) I_high = -meas_data; // FIXME: WHY !!
+    if (meas_data != NO_VALUE) I_high = -meas_data; // normal when we see the kicad
 
     meas_data = data.getLatest(ANALOG_SIN);
-    if (meas_data != NO_VALUE) Tq_meas = meas_data;
+    // if (meas_data != NO_VALUE) Tq_meas = meas_data;
 
     meas_data = data.getLatest(ANALOG_COS);
-    if (meas_data != NO_VALUE) Tq_meas2 = meas_data;
+    if (meas_data != NO_VALUE) Tq_meas = meas_data;
 
-    Tq_meas2 = tq_mes_filter.calculateWithReturn(Tq_meas2);
+    Tq_meas = tq_mes_filter.calculateWithReturn(Tq_meas);
     // Mesure de Vhigh
     V_high_filtered = vHigh_filter.calculateWithReturn(V_high); 
     if (V_high_filtered < V_HIGH_MIN) {
         V_high_filtered = V_HIGH_MIN;
     }
-
-    inverse_Vhigh = 0.0333;//1.0 / V_high_filtered;
-
+    inverse_Vhigh = 1.0/15.0;//1.0 / V_high_filtered;
     //reconstitution de l'index à partir de la lecture
     HALL1_value = spin.gpio.readPin(HALL1);
     HALL2_value = spin.gpio.readPin(HALL2);
     HALL3_value = spin.gpio.readPin(HALL3);
-    direction_A3 = spin.gpio.readPin(PA3);
-    direction_A3_f = direction_A3;
-
+    PA2_value = spin.gpio.readPin(PA2);
+    PA3_value = spin.gpio.readPin(PA3);
+    ab_value = 2.0F * PI / 4.0F * ab_sector[(PA2_value * 2 + PA3_value * 1)];
     angle_index = HALL3_value*4 + HALL2_value*2 + HALL1_value*1;
 
     angle_index_f = (float32_t) angle_index;
@@ -465,90 +431,117 @@ void loop_critical_task()
     w_estimate = pulsation_estimator(sector[angle_index], counter_time*Ts);
     sector_f = (float32_t) sector[angle_index];
     pllDatas = pllangle.calculateWithReturn(hall_angle);
-    // DEBUG
+    ab_pll_datas = pll_ab.calculateWithReturn(ab_value);
+    ab_pulsation = ab_pulse_filter.calculateWithReturn(ab_pll_datas.w);
     angle_filtered = pllDatas.angle;
-    // angle_filtered = ot_modulo_2pi(angle_filtered +  Ts * 2.0 * PI * f0_target);
-    angle_4_control = angle_filtered;
-    if (I1_low_value > CURRENT_LIMIT || I1_low_value < -CURRENT_LIMIT || I2_low_value > CURRENT_LIMIT || I2_low_value < -CURRENT_LIMIT) {
-        mode = ERRORMODE;
+    w_meas = w_mes_filter.calculateWithReturn(pllDatas.w);    
+
+    switch (control_state) {
+        case OFFSET_ST:
+            if (counter_time > 2000) {
+                spin.led.turnOff();
+                control_state = IDLE_ST;
+                I1_offset = - tmpI1_offset / 2000.0;
+                I2_offset = - tmpI2_offset / 2000.0;
+            }
+        break;
+
+        case IDLE_ST:
+            if ((asked_mode == POWERMODE) && (V_high_filtered > V_HIGH_MIN)) {
+                control_state = STARTUP_ST;
+            }
+        break;
+
+        case STARTUP_ST:
+            if (duty_ramp == 0.5) control_state = POWER_ST;
+        break;
+
+        case POWER_ST:
+            if (asked_mode == IDLEMODE) {
+                control_state = IDLE_ST;
+            }
+        break;
+
+        case ERROR_ST:
+            if (asked_mode == IDLEMODE)
+                error_counter = 0;
+                control_state = IDLE_ST;
+            break;
     }
-    if (mode == IDLEMODE || mode == ERRORMODE) {
+
+    angle_4_control = angle_filtered;
+    if (I1_low_value > AC_CURRENT_LIMIT || I1_low_value < -AC_CURRENT_LIMIT || I2_low_value > AC_CURRENT_LIMIT || I2_low_value < -AC_CURRENT_LIMIT || I_high > DC_CURRENT_LIMIT) {
+        error_counter++;
+    }
+    if (error_counter > 2) {
+        control_state = ERROR_ST;
+    }
+    if (control_state == IDLE_ST || control_state == ERROR_ST) {
         if (pwm_enable == true) {
             twist.stopAll();
             // reset filters and pid
             init_filt_and_reg();
             pwm_enable = false;
         }
-    } else if (mode == POWERMODE) {
-        //--- (combinaison de 3 bits : binary to decimal) ---------------------
-
-
-        if (regulation_mode == TORQUE) {
-            w_ref = pllDatas.w;
-            if (w_estimate >= 0.0) {
-                Iq_ref = (Tq_meas2 - 1600.0) * 0.001 * k_tq;
-                if (Iq_ref > 0.0)
-                    Idq_ref.q = Iq_ref;
-                // Idq_ref.q = -(w_estimate-50.0)*0.01 * k_durete;
-            }
-            else {
-                Idq_ref.q = 0.0;
-            }
-            Idq_ref.d = 0.0;
-        } else if (regulation_mode == SPEED) {
-            w_ref = manual_w_ref;
-            Idq_ref.q = speed_regul_Iq_ref;
-            Idq_ref.d = 0.0;
-        } else {
-        };
-
-        w_meas = w_mes_filter.calculateWithReturn(pllDatas.w);    
-        w_ref_filtered = w_ref_filter.calculateWithReturn(w_ref);
-        speed_regul_Iq_ref = pi_speed.calculateWithReturn(w_ref_filtered, w_meas);
-        Iabc.a = -(I1_low_value+old_I1_low)*0.5; // FIXME:WHY ??
-        Iabc.b = -(I2_low_value+old_I2_low)*0.5; // FIXME:WHY ??
-        Iabc.c = -(I1_low_value + I2_low_value);
-        old_I1_low = I1_low_value;
-        old_I2_low = I2_low_value;
+    } else if (control_state == POWER_ST) {
+        Idq_ref.q = 0.001 * (Tq_meas - 1600.0) * k_tq;
+        if (w_estimate > 1000 && Idq_ref.q > 0.5) Idq_ref.q = (1000.0-w_estimate) * 0.001 + 0.5; 
+        if (Idq_ref.q > 1.0) Idq_ref.q = 1.0;
+        if (Idq_ref.q < 0.0) Idq_ref.q = 0.0;
+        if (ab_pulsation < 5.0 ) Idq_ref.q = 0.0;
+        Idq_ref.d = 0.0;
+        Iabc.a = I2_low_value; 
+        Iabc.b = I1_low_value;
+        Iabc.c = -(Iabc.a + Iabc.b);
         Idq = Transform::to_dqo(Iabc, angle_4_control);
-        Iabc_ref = Transform::to_threephase(Idq_ref, angle_4_control);
-        Ia_ref = Iabc_ref.a;
-        Id_ref = Idq_ref.d;
-        Iq_ref = Idq_ref.q;
-        Idq_ref.o = 0.0F;
-        Id_meas = Idq.d;
-        Iq_meas = Idq.q;
         Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
         Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
         Vdq.o = 0.0F;
         Vabc = Transform::to_threephase(Vdq, angle_4_control);
-        Vd = Vdq.d;
-        Vq = Vdq.q;
-        Va = Vabc.a;
-        Vb = Vabc.b;
-        duty_abc.a = (Vabc.a * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc_ref.a, comp_dt)); 
-        duty_abc.b = (Vabc.b * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc_ref.b, comp_dt));
-        duty_abc.c = (Vabc.c * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc_ref.c, comp_dt));
-        duty_a = duty_abc.a;
-        duty_b = duty_abc.b;
-        
+    }
+    switch (control_state) {
+        case POWER_ST:
+            duty_abc.a = (Vabc.a * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc.a, comp_dt); 
+            duty_abc.b = (Vabc.b * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc.b, comp_dt);
+            duty_abc.c = (Vabc.c * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc.c, comp_dt);
+            break;
+        case STARTUP_ST:
+            duty_ramp +=  0.5F / 1000.0F;
+            if (duty_ramp > 0.5)
+                duty_ramp = 0.5;
+            if (duty_ramp < 0.1)
+                duty_ramp = 0.1;
+            duty_abc.a = duty_ramp; 
+            duty_abc.b = duty_ramp; 
+            duty_abc.c = duty_ramp;
+            break;
+        default:
+            break;
+    }
+    if (control_state == STARTUP_ST || control_state == POWER_ST) {
         twist.setLegDutyCycle(LEG1, duty_abc.a);
         twist.setLegDutyCycle(LEG2, duty_abc.b);
         twist.setLegDutyCycle(LEG3, duty_abc.c);
-
-        if (counter_time%decimation == 0)
-        {
-            scope.acquire();
-        }
+    }
+    if (control_state == STARTUP_ST) {
         if (!pwm_enable)
         {
             pwm_enable = true;
             twist.startAll();
         }
+    }
+    if (counter_time%decimation == 0)
+    {
+        Va = Vabc.a;
+        duty_a = duty_abc.a;
+        duty_b = duty_abc.b;
+        Iq_ref = Idq_ref.q;
 
+        Iq_meas = Idq.q;
+        ab_angle = ab_pll_datas.angle;
+        scope.acquire();
     }
 }
-
 /**
  * This is the main function of this example
  * This function is generic and does not need editing.

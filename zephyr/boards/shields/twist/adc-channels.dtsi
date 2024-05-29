@@ -53,30 +53,30 @@
 
 		/* Current channels */
 
-		i1low: i1-low {
-			compatible = "adc-channels";
-			channel-name = "I1_LOW";
-			default-gain = <0x3ba3d70a>;
-			default-offset = <0xc1200000>;
-			spin-pin = <30>;
-			i1-low-adc1 {
-				io-channels = <&adc1 2>;
-			};
-			i1-low-adc2 {
-				io-channels = <&adc2 2>;
-			};
-		};
-
 		i2low: i2-low {
 			compatible = "adc-channels";
 			channel-name = "I2_LOW";
 			default-gain = <0x3ba3d70a>;
 			default-offset = <0xc1200000>;
-			spin-pin = <25>;
+			spin-pin = <30>;
 			i2-low-adc1 {
-				io-channels = <&adc1 7>;
+				io-channels = <&adc1 2>;
 			};
 			i2-low-adc2 {
+				io-channels = <&adc2 2>;
+			};
+		};
+
+		i1low: i1-low {
+			compatible = "adc-channels";
+			channel-name = "I1_LOW";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			spin-pin = <25>;
+			i1-low-adc1 {
+				io-channels = <&adc1 7>;
+			};
+			i1-low-adc2 {
 				io-channels = <&adc2 7>;
 			};
 		};
