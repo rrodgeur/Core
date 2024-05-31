@@ -53,7 +53,7 @@ void application_task();
 
 static const float32_t AC_CURRENT_LIMIT = 10.0;
 static const float32_t DC_CURRENT_LIMIT = 5.0;
-static const float32_t MIN_DC_VOLTAGE = 36.0; // for control
+static const float32_t MIN_DC_VOLTAGE = 25.0; // for control
 static const float32_t V_HIGH_MIN = 5.0;      // to start the POWER
 static const float32_t Ts = 100.e-6F;
 static const uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
@@ -109,12 +109,13 @@ static float32_t duty_a, duty_b;
 static float32_t Va;
 static float32_t Iq_meas;
 static float32_t Iq_ref;
+static float32_t Iq_max;
 static float32_t angle_4_control;
 
 static LowPassFirstOrderFilter w_ref_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter vHigh_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter w_mes_filter = controlLibFactory.lowpassfilter(Ts, 1.0e-3F);
-static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
+static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(Ts, 20.0e-3F);
 static LowPassFirstOrderFilter ab_pulse_filter = controlLibFactory.lowpassfilter(Ts, 100.0e-3F);
 static float32_t V_high_filtered;
 static float32_t inverse_Vhigh;
@@ -242,7 +243,7 @@ static __inline__ float32_t dead_time_comp(float32_t I, float32_t comp_value)
     return dt;
 }
 
-void retrieve_analog_datas() {
+inline void retrieve_analog_datas() {
 
     meas_data = data.getLatest(I1_LOW);
     if (meas_data != NO_VALUE) I1_low_value = meas_data + I1_offset;
@@ -272,7 +273,7 @@ void retrieve_analog_datas() {
     V_high_filtered = vHigh_filter.calculateWithReturn(V_high);
 }
 
-void get_position_and_speed() {
+inline void get_position_and_speed() {
     //reconstitution de l'index à partir de la lecture
     HALL1_value = spin.gpio.readPin(HALL1);
     HALL2_value = spin.gpio.readPin(HALL2);
@@ -286,7 +287,7 @@ void get_position_and_speed() {
     angle_filtered = pllDatas.angle;
     w_meas = w_mes_filter.calculateWithReturn(pllDatas.w);
 }
-void get_pedal_speed() {
+inline void get_pedal_speed() {
 
     PA2_value = spin.gpio.readPin(PA2);
     PA3_value = spin.gpio.readPin(PA3);
@@ -296,7 +297,7 @@ void get_pedal_speed() {
 
 }
 
-void overcurrent_mngt() {
+inline void overcurrent_mngt() {
     if (I1_low_value > AC_CURRENT_LIMIT || I1_low_value < -AC_CURRENT_LIMIT || I2_low_value > AC_CURRENT_LIMIT || I2_low_value < -AC_CURRENT_LIMIT || I_high > DC_CURRENT_LIMIT) {
         error_counter++;
     }
@@ -305,7 +306,7 @@ void overcurrent_mngt() {
     }
 }
 
-void stop_pwm_and_reset_regulation() {
+inline void stop_pwm_and_reset_regulation() {
     if (pwm_enable == true) {
         twist.stopAll();
         // reset filters and pid
@@ -314,11 +315,11 @@ void stop_pwm_and_reset_regulation() {
     }
 }
 
-void control_torque() {
+inline void control_torque() {
         angle_4_control = angle_filtered;
         Idq_ref.q = 0.001 * (Tq_meas - 1600.0) * k_tq;
-        if (w_estimate > 1000 && Idq_ref.q > 0.5) Idq_ref.q = (1000.0-w_estimate) * 0.001 + 0.5; 
-        if (Idq_ref.q > 1.0) Idq_ref.q = 1.0;
+        // if (w_estimate > 1000 && Idq_ref.q > 0.5) Idq_ref.q = (1000.0-w_estimate) * 0.001 + 0.5; 
+        if (Idq_ref.q > Iq_max) Idq_ref.q = Iq_max;
         if (Idq_ref.q < 0.0) Idq_ref.q = 0.0;
         if (ab_pulsation < 5.0 ) Idq_ref.q = 0.0;
         Idq_ref.d = 0.0;
@@ -333,7 +334,7 @@ void control_torque() {
 
 }
 
-void compute_duties() {
+inline void compute_duties() {
     inverse_Vhigh = 1.0/ MIN_DC_VOLTAGE;
     duty_abc.a = (Vabc.a * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc.a, comp_dt); 
     duty_abc.b = (Vabc.b * 0.5 * inverse_Vhigh + 0.5); // + dead_time_comp(Iabc.b, comp_dt);
@@ -341,7 +342,7 @@ void compute_duties() {
 
 }
 
-void apply_duties() {
+inline void apply_duties() {
     twist.setLegDutyCycle(LEG1, duty_abc.a);
     twist.setLegDutyCycle(LEG2, duty_abc.b);
     twist.setLegDutyCycle(LEG3, duty_abc.c);
@@ -436,6 +437,7 @@ void setup_routine()
     tmpI1_offset = 0.0;
     tmpI2_offset = 0.0;
     k_tq = 3.0;
+    Iq_max = 1.0;
     nb_offset = 2000;
     spin.led.turnOn();
     // Then declare tasks
@@ -478,6 +480,12 @@ void loop_background_task()
         case 'd':
             k_tq -= 1.0F;
             break;
+        case 'j':
+            Iq_max += 0.5;
+        break;
+        case 'k':
+            Iq_max -= 0.5;
+        break;
     }
 
     // Pause between two runs of the task
@@ -486,13 +494,13 @@ void application_task() {
 
     printk("%.2f:", I_high);
     printk("%.2f:", V_high_filtered);
-    printk("%.2f:", Tq_meas-1500);
     printk("%.2f:", ab_pulsation);
     printk("%.2f:", w_estimate);
     printk("%.2f:", Iq_ref);
     printk("%d:", scope.has_trigged());
-    printk("%.2f:", ab_value);
     printk("%.0f:", k_tq);
+    printk("%.2f:", Iq_meas);
+    printk("%.2f:", Iq_max);
     printk("%d\n", control_state);
 
     if (is_downloading) {
