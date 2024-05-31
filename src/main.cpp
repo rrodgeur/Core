@@ -53,7 +53,7 @@ void application_task();
 
 static const float32_t AC_CURRENT_LIMIT = 10.0;
 static const float32_t DC_CURRENT_LIMIT = 5.0;
-static const float32_t MIN_DC_VOLTAGE = 25.0; // for control
+static const float32_t MIN_DC_VOLTAGE = 35.0; // for control
 static const float32_t V_HIGH_MIN = 5.0;      // to start the POWER
 static const float32_t Ts = 100.e-6F;
 static const uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
@@ -70,7 +70,7 @@ static PllDatas pllDatas;
 static float32_t angle_filtered;
 static float32_t w_meas;
 static int16_t sector[] = {-1, 4, 2, 3, 0, 5, 1};
-static float32_t k_calage = 11.0;
+static float32_t k_calage = 10.0;
 
 // LEG meas
 static float32_t meas_data;
@@ -110,12 +110,20 @@ static float32_t Va;
 static float32_t Iq_meas;
 static float32_t Iq_ref;
 static float32_t Iq_max;
+static float32_t Vd, Vq;
 static float32_t angle_4_control;
+
+static float32_t manual_Iq_ref;
+enum regulation_mode {
+    TORQUE_MODE=0,
+    ASSIST_MODE=1
+} regulation_asked;
+
 
 static LowPassFirstOrderFilter w_ref_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter vHigh_filter = controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 static LowPassFirstOrderFilter w_mes_filter = controlLibFactory.lowpassfilter(Ts, 1.0e-3F);
-static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(Ts, 20.0e-3F);
+static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(Ts, 1000.0e-3F); // 1s to filter a lot.
 static LowPassFirstOrderFilter ab_pulse_filter = controlLibFactory.lowpassfilter(Ts, 100.0e-3F);
 static float32_t V_high_filtered;
 static float32_t inverse_Vhigh;
@@ -140,7 +148,7 @@ static Pid pi_speed = controlLibFactory.pid(Ts, Kp_speed, Ti_speed, Td, N, lower
 // 45 pair of poles
 // 1 wheel of 26 inches (1 inch = 2.54cm)
 const float32_t to_kmh = 0.02641;
-const static uint32_t decimation = 10;
+const static uint32_t decimation = 20;
 static uint32_t counter_time;
 
 static float32_t w_estimate;
@@ -179,7 +187,7 @@ void init_filt_and_reg(void) {
     error_counter = 0;
 }
 
-ScopeMimicry scope(512, 9);
+ScopeMimicry scope(512, 11);
 static bool is_downloading;
 bool mytrigger() {
     return ((ab_pulsation > 2.0 || ab_pulsation < -2.0) && control_state == POWER_ST);
@@ -316,21 +324,24 @@ inline void stop_pwm_and_reset_regulation() {
 }
 
 inline void control_torque() {
-        angle_4_control = angle_filtered;
+    angle_4_control = angle_filtered;
+    if (regulation_asked == TORQUE_MODE)
+        Idq_ref.q = manual_Iq_ref;
+    else
         Idq_ref.q = 0.001 * (Tq_meas - 1600.0) * k_tq;
-        // if (w_estimate > 1000 && Idq_ref.q > 0.5) Idq_ref.q = (1000.0-w_estimate) * 0.001 + 0.5; 
-        if (Idq_ref.q > Iq_max) Idq_ref.q = Iq_max;
-        if (Idq_ref.q < 0.0) Idq_ref.q = 0.0;
-        if (ab_pulsation < 5.0 ) Idq_ref.q = 0.0;
-        Idq_ref.d = 0.0;
-        Iabc.a = I2_low_value; 
-        Iabc.b = I1_low_value;
-        Iabc.c = -(Iabc.a + Iabc.b);
-        Idq = Transform::to_dqo(Iabc, angle_4_control);
-        Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
-        Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
-        Vdq.o = 0.0F;
-        Vabc = Transform::to_threephase(Vdq, angle_4_control);
+
+    if (Idq_ref.q > Iq_max) Idq_ref.q = Iq_max;
+    if (Idq_ref.q < 0.0) Idq_ref.q = 0.0;
+    if (ab_pulsation < 5.0 && regulation_asked == ASSIST_MODE) Idq_ref.q = 0.0;
+    Idq_ref.d = 0.0;
+    Iabc.a = I2_low_value; 
+    Iabc.b = I1_low_value;
+    Iabc.c = -(Iabc.a + Iabc.b);
+    Idq = Transform::to_dqo(Iabc, angle_4_control);
+    Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
+    Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
+    Vdq.o = 0.0F;
+    Vabc = Transform::to_threephase(Vdq, angle_4_control);
 
 }
 
@@ -386,6 +397,27 @@ void config_adcs() {
     data.enableShieldChannel(2, ANALOG_SIN);
     data.enableShieldChannel(2, ANALOG_COS);
 }
+
+void init_constant() {
+    counter_time = 0;
+    I1_low_value = 0.0;
+    I2_low_value = 0.0;
+    I_high = 0.0;
+    V_high = 0.0;
+    pwm_enable = false;
+    asked_mode = IDLEMODE;
+    control_state = OFFSET_ST;
+    I1_offset = 0.0;
+    I2_offset = 0.0;
+    tmpI1_offset = 0.0;
+    tmpI2_offset = 0.0;
+    k_tq = 3.0;
+    Iq_max = 2.0;
+    manual_Iq_ref = 0.0;
+    nb_offset = 2000;
+    regulation_asked = ASSIST_MODE;
+}
+
 //--------------SETUP FUNCTIONS-------------------------------
 /**
  * This is the setup routine.
@@ -420,25 +452,13 @@ void setup_routine()
     scope.connectChannel(Iq_meas, "I_qmeas");
     scope.connectChannel(angle_filtered, "angle_filtered");
     scope.connectChannel(hall_angle, "hall_angle");
+    scope.connectChannel(Vq, "V_q");
+    scope.connectChannel(Vd, "V_d");
     scope.set_trigger(&mytrigger);
     scope.set_delay(0.0);
     scope.start();
     init_filt_and_reg();
-    counter_time = 0;
-    I1_low_value = 0.0;
-    I2_low_value = 0.0;
-    I_high = 0.0;
-    V_high = 0.0;
-    pwm_enable = false;
-    asked_mode = IDLEMODE;
-    control_state = OFFSET_ST;
-    I1_offset = 0.0;
-    I2_offset = 0.0;
-    tmpI1_offset = 0.0;
-    tmpI2_offset = 0.0;
-    k_tq = 3.0;
-    Iq_max = 1.0;
-    nb_offset = 2000;
+    init_constant();
     spin.led.turnOn();
     // Then declare tasks
     uint32_t background_task_number = task.createBackground(loop_background_task);
@@ -462,16 +482,16 @@ void loop_background_task()
     switch (received_serial_char) {
         case 'h':
             printk("help");
-        break;
+            break;
         case 'p':
             printk("power asked");
             asked_mode = POWERMODE;
             scope.start();
-        break;
+            break;
         case 'i':
             printk("idle asked");
             asked_mode = IDLEMODE;
-        break;
+            break;
         case 'r':
             is_downloading = true;
         case 'u':
@@ -482,10 +502,35 @@ void loop_background_task()
             break;
         case 'j':
             Iq_max += 0.5;
-        break;
+            manual_Iq_ref = Iq_max;
+            break;
         case 'k':
             Iq_max -= 0.5;
-        break;
+            manual_Iq_ref = Iq_max;
+            break;
+
+        case 'a': 
+            // TO SWITCH BETWEEN ASSIST AND TORQUE MODE.
+            // IN TORQUE MODE IQ_MAX DRIVE
+            if (regulation_asked == TORQUE_MODE) {
+                regulation_asked = ASSIST_MODE;
+                printk("ASSIST\n");
+            }
+            else {
+                regulation_asked = TORQUE_MODE;
+                Iq_max = 0.0;
+                manual_Iq_ref = 0.0;
+                printk("TORQUE\n");
+            }
+
+            break;
+        case 't':
+            k_calage += 1.0;
+            break;
+
+        case 'g':
+            k_calage -= 1.0;
+            break;
     }
 
     // Pause between two runs of the task
@@ -498,7 +543,7 @@ void application_task() {
     printk("%.2f:", w_estimate);
     printk("%.2f:", Iq_ref);
     printk("%d:", scope.has_trigged());
-    printk("%.0f:", k_tq);
+    printk("%.0f:", k_calage);
     printk("%.2f:", Iq_meas);
     printk("%.2f:", Iq_max);
     printk("%d\n", control_state);
@@ -589,6 +634,8 @@ void loop_critical_task()
         duty_b = duty_abc.b;
         Iq_ref = Idq_ref.q;
         Iq_meas = Idq.q;
+        Vd = Vdq.d;
+        Vq = Vdq.q;
         ab_angle = ab_pll_datas.angle;
         scope.acquire();
     }
