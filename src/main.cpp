@@ -58,7 +58,7 @@ static const float32_t V_HIGH_MIN = 5.0;      // to start the POWER
 static const float32_t Ts = 100.e-6F;
 static const uint32_t control_task_period = (uint32_t) (Ts * 1.e6F);
 
-// Hall effect sensors
+/* Hall effect sensors */
 static uint8_t HALL1_value;
 static uint8_t HALL2_value;
 static uint8_t HALL3_value;
@@ -82,13 +82,13 @@ static float32_t tmpI1_offset;
 static float32_t tmpI2_offset;
 static float32_t nb_offset;
 
-// dc meas
+// DC meas
 static float32_t I_high;
 static float32_t V_high;
 static float32_t Tq_meas;
-static float32_t k_tq;
+static float32_t assist_torque_coef;
 
-// AB index
+/* Pedal Incremental encoder */
 static float32_t ab_sector[] = {0.F, 1.F, 3.F, 2.F};
 static uint8_t PA2_value;
 static uint8_t PA3_value;
@@ -97,6 +97,7 @@ static float32_t ab_pulsation;
 static float32_t ab_angle;
 static PllDatas ab_pll_datas;
 
+/* Three phase system and dqo */
 static three_phase_t Vabc;
 static three_phase_t duty_abc;
 static float32_t duty_ramp = 0.1;
@@ -104,6 +105,9 @@ static three_phase_t Iabc;
 static dqo_t Vdq;
 static dqo_t Idq;
 static dqo_t Idq_ref;
+static float32_t angle_4_control;
+
+/* variables used to get static value for scopemimicry */
 // static float32_t comp_dt = 0.01;
 static float32_t duty_a, duty_b;
 static float32_t Va;
@@ -111,9 +115,9 @@ static float32_t Iq_meas;
 static float32_t Iq_ref;
 static float32_t Iq_max;
 static float32_t Vd, Vq;
-static float32_t angle_4_control;
 
 static float32_t manual_Iq_ref;
+
 enum regulation_mode {
     TORQUE_MODE=0,
     ASSIST_MODE=1
@@ -127,9 +131,8 @@ static LowPassFirstOrderFilter tq_mes_filter = controlLibFactory.lowpassfilter(T
 static LowPassFirstOrderFilter ab_pulse_filter = controlLibFactory.lowpassfilter(Ts, 100.0e-3F);
 static float32_t V_high_filtered;
 static float32_t inverse_Vhigh;
-//--- PID ---
-// static float32_t Kp = 30*0.035;
-// static float32_t Ti = 0.001029;
+
+/*--- PID ---*/
 static float32_t Kp = 15*0.035;
 static float32_t Ti = 0.005029;
 static float32_t Td = 0.0;
@@ -138,15 +141,12 @@ static float32_t lower_bound = -MIN_DC_VOLTAGE * 0.5;
 static float32_t upper_bound = MIN_DC_VOLTAGE * 0.5;
 static Pid pi_d = controlLibFactory.pid(Ts, Kp, Ti, Td, N, lower_bound, upper_bound);
 static Pid pi_q = controlLibFactory.pid(Ts, Kp, Ti, Td, N, lower_bound, upper_bound);
-static float32_t Kp_speed = 0.001;
-static float32_t Ti_speed = 0.10;
-static float32_t lower_bound_speed = 0.0;
-static float32_t upper_bound_speed = 2.0;
-static Pid pi_speed = controlLibFactory.pid(Ts, Kp_speed, Ti_speed, Td, N, lower_bound_speed, upper_bound_speed);
+
 // transform electrical pulsation to linear speed in km/h
 // to_kmh = (1.0/45.0*26*0.0254)/1000.0*3600.0; 
 // 45 pair of poles
 // 1 wheel of 26 inches (1 inch = 2.54cm)
+
 const float32_t to_kmh = 0.02641;
 const static uint32_t decimation = 20;
 static uint32_t counter_time;
@@ -157,7 +157,6 @@ enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVER
 {
     IDLEMODE = 0,
     POWERMODE = 1,
-    ERRORMODE = 2
 };
 
 enum control_state_mode {
@@ -166,7 +165,6 @@ enum control_state_mode {
     STARTUP_ST = 2,
     POWER_ST = 3,
     ERROR_ST = 4
-
 };
 
 enum control_state_mode control_state;
@@ -183,15 +181,16 @@ void init_filt_and_reg(void) {
     tq_mes_filter.reset(1500.0);
     pi_d.reset();
     pi_q.reset();
-    pi_speed.reset();
     error_counter = 0;
 }
 
 ScopeMimicry scope(512, 11);
 static bool is_downloading;
+
 bool mytrigger() {
     return ((ab_pulsation > 2.0 || ab_pulsation < -2.0) && control_state == POWER_ST);
 }
+
 void dump_scope_datas(ScopeMimicry &scope)  {
     uint8_t *buffer = scope.get_buffer();
     uint16_t buffer_size = scope.get_buffer_size() >> 2; // we divide by 4 (4 bytes per float data) 
@@ -208,19 +207,19 @@ void dump_scope_datas(ScopeMimicry &scope)  {
     }
     printk("end record\n");
 }
+
 /* 
  * pulsation_estimator(sector, time)
  *
  * assume sector in integer in [0, 5] 
  */
-float32_t pulsation_estimator(int16_t sector, float32_t time) {
 
+float32_t pulsation_estimator(int16_t sector, float32_t time) {
     static float32_t w_estimate_intern = 0.0;
     static int16_t prev_sector;
     static float32_t prev_time = 0.0;
     int16_t delta_sector;
     float32_t sixty_degre_step_time;
-
     delta_sector = sector - prev_sector;
     prev_sector = sector; 
     if (delta_sector == 1 || delta_sector == -5) {
@@ -236,6 +235,7 @@ float32_t pulsation_estimator(int16_t sector, float32_t time) {
     }
     return w_estimate_intern;
 }
+
 static __inline__ float32_t dead_time_comp(float32_t I, float32_t comp_value)
 {
     float32_t dt;
@@ -252,7 +252,6 @@ static __inline__ float32_t dead_time_comp(float32_t I, float32_t comp_value)
 }
 
 inline void retrieve_analog_datas() {
-
     meas_data = data.getLatest(I1_LOW);
     if (meas_data != NO_VALUE) I1_low_value = meas_data + I1_offset;
 
@@ -295,6 +294,7 @@ inline void get_position_and_speed() {
     angle_filtered = pllDatas.angle;
     w_meas = w_mes_filter.calculateWithReturn(pllDatas.w);
 }
+
 inline void get_pedal_speed() {
 
     PA2_value = spin.gpio.readPin(PA2);
@@ -302,7 +302,6 @@ inline void get_pedal_speed() {
     ab_value = 2.0F * PI / 4.0F * ab_sector[(PA2_value * 2 + PA3_value * 1)];
     ab_pll_datas = pll_ab.calculateWithReturn(ab_value);
     ab_pulsation = ab_pulse_filter.calculateWithReturn(ab_pll_datas.w);
-
 }
 
 inline void overcurrent_mngt() {
@@ -328,7 +327,7 @@ inline void control_torque() {
     if (regulation_asked == TORQUE_MODE)
         Idq_ref.q = manual_Iq_ref;
     else
-        Idq_ref.q = 0.001 * (Tq_meas - 1600.0) * k_tq;
+        Idq_ref.q = 0.001 * (Tq_meas - 1600.0) * assist_torque_coef;
 
     if (Idq_ref.q > Iq_max) Idq_ref.q = Iq_max;
     if (Idq_ref.q < 0.0) Idq_ref.q = 0.0;
@@ -358,7 +357,6 @@ inline void apply_duties() {
     twist.setLegDutyCycle(LEG2, duty_abc.b);
     twist.setLegDutyCycle(LEG3, duty_abc.c);
 }
-
 
 void start_pwms() {
     if (!pwm_enable)
@@ -399,25 +397,31 @@ void config_adcs() {
 }
 
 void init_constant() {
-    counter_time = 0;
+    /* to count the time */
+    counter_time = 0; 
+    /* variable for measurements */
     I1_low_value = 0.0;
     I2_low_value = 0.0;
     I_high = 0.0;
     V_high = 0.0;
+    /* state view of the pwm */
     pwm_enable = false;
+    /* idle or power mode*/
     asked_mode = IDLEMODE;
+    /* we begin to measure the current offset before all */
     control_state = OFFSET_ST;
     I1_offset = 0.0;
     I2_offset = 0.0;
     tmpI1_offset = 0.0;
     tmpI2_offset = 0.0;
-    k_tq = 3.0;
+    /* number of data used to make offset */
+    nb_offset = 2000;
+    /* */
+    assist_torque_coef = 3.0;
     Iq_max = 2.0;
     manual_Iq_ref = 0.0;
-    nb_offset = 2000;
     regulation_asked = ASSIST_MODE;
 }
-
 //--------------SETUP FUNCTIONS-------------------------------
 /**
  * This is the setup routine.
@@ -470,11 +474,6 @@ void setup_routine()
     task.startCritical(); // Uncomment if you use the critical task
 }
 //--------------LOOP FUNCTIONS--------------------------------
-/**
- * This is the code loop of the background task
- * It is executed second as defined by it suspend task in its last line.
- * You can use it to execute slow code such as state-machines.
- */
 void loop_background_task()
 {
     // Task content
@@ -495,10 +494,10 @@ void loop_background_task()
         case 'r':
             is_downloading = true;
         case 'u':
-            k_tq += 1.0F;
+            assist_torque_coef += 1.0F;
             break;
         case 'd':
-            k_tq -= 1.0F;
+            assist_torque_coef -= 1.0F;
             break;
         case 'j':
             Iq_max += 0.5;
@@ -535,6 +534,7 @@ void loop_background_task()
 
     // Pause between two runs of the task
 }
+
 void application_task() {
 
     printk("%.2f:", I_high);
@@ -587,12 +587,7 @@ void application_task() {
 
     task.suspendBackgroundMs(250);
 }
-/**
- * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software function.
- * You can use it to execute an ultra-fast code with the highest priority which cannot be interruped.
- * It is from it that you will control your power flow.
- */
+
 void loop_critical_task()
 {
     counter_time++;
@@ -640,10 +635,7 @@ void loop_critical_task()
         scope.acquire();
     }
 }
-/**
- * This is the main function of this example
- * This function is generic and does not need editing.
- */
+
 int main(void)
 {
     setup_routine();
