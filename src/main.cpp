@@ -368,10 +368,12 @@ void start_pwms() {
 
 void make_duty_ramp() {
     duty_ramp +=  0.5F / 1000.0F;
-    if (duty_ramp > 0.5)
+    if (duty_ramp > 0.5) {
         duty_ramp = 0.5;
-    if (duty_ramp < 0.1)
+    }
+    if (duty_ramp < 0.1) {
         duty_ramp = 0.1;
+    }
     duty_abc.a = duty_ramp; 
     duty_abc.b = duty_ramp; 
     duty_abc.c = duty_ramp;
@@ -579,9 +581,10 @@ void application_task() {
         break;
 
         case ERROR_ST:
-            if (asked_mode == IDLEMODE)
+            if (asked_mode == IDLEMODE) {
                 error_counter = 0;
-            control_state = IDLE_ST;
+                control_state = IDLE_ST;
+            }
             break;
     }
 
@@ -622,7 +625,7 @@ void loop_critical_task()
             break;
     }
 
-    if (counter_time%decimation == 0)
+    if (counter_time % decimation == 0)
     {
         Va = Vabc.a;
         duty_a = duty_abc.a;
