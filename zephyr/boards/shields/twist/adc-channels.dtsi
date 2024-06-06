@@ -9,9 +9,9 @@
 
 		/* Voltage channels */
 
-		v1low: v1-low {
+		v2low: v2-low {
 			compatible = "adc-channels";
-			channel-name = "V1_LOW";
+			channel-name = "V2_LOW";
 			default-gain = <0x3d3851ec>;
 			default-offset = <0xc2b867f0>;
 			spin-pin = <29>;
@@ -23,9 +23,9 @@
 			};
 		};
 
-		v2low: v2-low {
+		v1low: v1-low {
 			compatible = "adc-channels";
-			channel-name = "V2_LOW";
+			channel-name = "V1_LOW";
 			default-gain = <0x3d3851ec>;
 			default-offset = <0xc2b867f0>;
 			spin-pin = <24>;
