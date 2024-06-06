@@ -46,7 +46,7 @@ void setup_routine(); // Setups the hardware and software of the system
 void loop_background_task();   // Code to be executed in the background task
 void loop_critical_task();     // Code to be executed in real time in the critical task
 void application_task();
-//--------------USER fARIABLES DECLARATIONS-------------------
+//--------------USER VARIABLES DECLARATIONS-------------------
 #define HALL1 PA7
 #define HALL2 PC6
 #define HALL3 PD2
@@ -63,23 +63,17 @@ static uint8_t HALL1_value;
 static uint8_t HALL2_value;
 static uint8_t HALL3_value;
 
-static float32_t HALL1_value_f;
-static float32_t HALL2_value_f;
-static float32_t HALL3_value_f;
-
 static uint8_t angle_index;
-static float32_t angle_index_f;
 static float32_t hall_angle;
 static PllAngle pllangle = controlLibFactory.pllAngle(Ts, 10.0F, 0.04F);
 static PllDatas pllDatas;
 static float32_t angle_filtered;
 static float32_t w_meas;
-// en logique calculée positive!
-// static int16_t sector[] = {-1, 5, 1, 0, 3, 4, 2};
-// en logique négative:
-static int16_t sector[] = {-1, 2, 4, 3, 0, 1, 5}; 
-
-static float32_t k_calage = 1.0;
+// one sector for one index value
+// index = H1*2^0 + H2*2^1 + H3*2^2
+static int16_t sector[] = {-1, 5, 1, 0, 3, 4, 2};
+//  
+static float32_t k_angle_offset = 0.0;
 
 // LEG meas
 static float32_t meas_data;
@@ -108,7 +102,6 @@ static dqo_t Idq_ref;
 static float32_t angle_4_control;
 
 /* variables used to get static value for scopemimicry */
-// static float32_t comp_dt = 0.01;
 static three_phase_t Iabc_ref;
 static float32_t duty_a, duty_b;
 static float32_t Ia_ref;
@@ -118,7 +111,12 @@ static float32_t Iq_meas;
 static float32_t Iq_ref;
 static float32_t Iq_max;
 static float32_t Vd, Vq;
+static float32_t HALL1_value_f;
+static float32_t HALL2_value_f;
+static float32_t HALL3_value_f;
+static float32_t angle_index_f;
 
+// We make only torque control.
 static float32_t manual_Iq_ref;
 
 enum regulation_mode {
@@ -149,7 +147,7 @@ static Pid pi_q = controlLibFactory.pid(Ts, Kp, Ti, Td, N, lower_bound, upper_bo
 // 1 wheel of 26 inches (1 inch = 2.54cm)
 
 const float32_t to_kmh = 0.02641;
-const static uint32_t decimation = 1;
+const static uint32_t decimation = 10;
 static uint32_t counter_time;
 float32_t counter_time_f;
 static float32_t w_estimate;
@@ -183,7 +181,7 @@ void init_filt_and_reg(void) {
     error_counter = 0;
 }
 
-const uint16_t SCOPE_SIZE = 512;
+const uint16_t SCOPE_SIZE = 1024;
 uint16_t k_app_idx;
 ScopeMimicry scope(SCOPE_SIZE, 10);
 static bool is_downloading;
@@ -191,7 +189,7 @@ static bool memory_print;
 
 
 bool mytrigger() {
-    return true;
+    return (control_state == POWER_ST);
 }
 
 float32_t get_channel_value(uint32_t index, uint32_t channel_idx) {
@@ -300,7 +298,7 @@ inline void get_position_and_speed() {
     HALL3_value = spin.gpio.readPin(HALL3);
     angle_index = HALL3_value*4 + HALL2_value*2 + HALL1_value*1;
     angle_index_f = angle_index;
-    hall_angle = ot_modulo_2pi(PI / 3.0 * sector[angle_index] + PI * k_calage / 6.0);
+    hall_angle = ot_modulo_2pi(PI / 3.0 * sector[angle_index] + PI * k_angle_offset / 24.0);
     w_estimate = pulsation_estimator(sector[angle_index], counter_time*Ts);
     pllDatas = pllangle.calculateWithReturn(hall_angle);
 
@@ -524,10 +522,10 @@ void loop_background_task()
 
             break;
         case 't':
-            k_calage += 1.0;
+            k_angle_offset += 1.0;
             break;
         case 'g':
-            k_calage -= 1.0;
+            k_angle_offset -= 1.0;
             break;
         case 'm':
             memory_print = !memory_print;
@@ -544,7 +542,7 @@ void application_task() {
 
     if (!memory_print) {
     printk("%7.2f:", V_high);
-    printk("%7.2f:", k_calage);
+    printk("%7.2f:", k_angle_offset);
     printk("%7.2f:", Iq_max);
     printk("%7.2f:", manual_Iq_ref);
     printk("%7d\n", control_state);

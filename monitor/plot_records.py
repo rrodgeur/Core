@@ -41,6 +41,12 @@ def plot_df(df):
             axs[1].step(tics, df[s], label=s)
         else:
             axs[2].step(tics, df[s], label=s)
+
+    try:
+        axs[0].step(tics, np.sqrt(df['Vd']**2 + df['Vq']**2), label='Vd+Vq')
+    except:
+        pass
+
     for ax in axs:
         ax.legend()
         # ax.set_ylim([-50, 50])
@@ -52,6 +58,7 @@ if __name__ == '__main__':
     parser.add_argument("filename")
     args = parser.parse_args()
     df = to_dataFrame(args.filename)
+    df.to_csv('last_datas.csv')
     plot_df(df)
     plt.show()
     input('enter char')
