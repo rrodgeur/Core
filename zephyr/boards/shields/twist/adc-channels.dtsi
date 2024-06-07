@@ -40,7 +40,7 @@
 		vhigh: v-high {
 			compatible = "adc-channels";
 			channel-name = "V_HIGH";
-			default-gain = <0x3cf57710>;
+			default-gain = <0x3df5c28f>;
 			default-offset = <0x00000000>;
 			spin-pin = <26>;
 			v-high-adc1 {
