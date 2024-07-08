@@ -93,7 +93,8 @@ static float32_t Ts = control_task_period * 1.0e-6F;
 
 // comes from "filters.h"
 LowPassFirstOrderFilter vHighFilter(Ts, 0.1F);
-static uint32_t critical_task_counter; 
+static uint32_t critical_task_counter;
+static uint32_t decimation;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
@@ -374,7 +375,6 @@ void loop_critical_task()
         mode = ERRORMODE;
     }
 
-
     if (mode == IDLEMODE || mode == ERRORMODE)
     {
         // FIRST WE STOP THE PWM
@@ -414,7 +414,7 @@ void loop_critical_task()
         pq_power = power_ac1phase(V1_low_value - V2_low_value, I1_low_value, &ac_meas_config);
 
     }
-    if (critical_task_counter%3 == 0) {
+    if (critical_task_counter%decimation == 0) {
 		P_power = pq_power.p;
 		Q_power = pq_power.q;
         spying_mode = (float32_t) mode;
