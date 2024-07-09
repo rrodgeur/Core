@@ -17,9 +17,11 @@ power_ac1phase_t power_ac1phase(float32_t v, float32_t i, power_ac1phase_params_
     sogi_pll_calc(v, &params->sogi_pll_params);
     Iab = sogi_calc(i, params->w0, &params->sogi_i_params) ;
     Idq = Transform::rotation_to_dqo(Iab, params->sogi_pll_params.theta);
+	params->Iab = Iab;
+	params->Idq = Idq;
     Vdq = params->sogi_pll_params.Vdq;
-    power.p = 0.5 * (Vdq.d * Idq.d + Vdq.q * Idq.q);
-    power.q = 0.5 * (Idq.d * Vdq.q - Idq.q * Vdq.d);
+    power.p = 0.5F * (Vdq.d * Idq.d + Vdq.q * Idq.q);
+    power.q = 0.5F * (Idq.d * Vdq.q - Idq.q * Vdq.d);
     return power;
 }
 

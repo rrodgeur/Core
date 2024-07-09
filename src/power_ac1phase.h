@@ -11,6 +11,8 @@ typedef struct {
     sogi_pll_params_t sogi_pll_params;
     sogi_params_t sogi_i_params;
     float32_t w0;
+	dqo_t Idq;
+	clarke_t Iab;
 } power_ac1phase_params_t; 
 
 
