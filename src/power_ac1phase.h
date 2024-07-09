@@ -1,5 +1,5 @@
-#ifndef DROOP_AC_1PHASE_H
-#define DROOP_AC_1PHASE_H
+#ifndef POWER_AC1PHASE_H
+#define POWER_AC1PHASE_H
 #include "sogi_pll.h"
 
 typedef struct {

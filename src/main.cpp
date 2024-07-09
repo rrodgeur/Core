@@ -38,8 +38,9 @@
 #include "pr.h"
 #include "trigo.h"
 #include "filters.h"
+#include "power_ac1phase.h"
 #include "ScopeMimicry.h"
-#include "droop_ac1phase.h"
+
 #include "zephyr/console/console.h"
 
 #define DUTY_MIN 0.1F
@@ -69,8 +70,10 @@ static float32_t I_high; // [A]
 static float32_t V_high_filt; // [V]
 
 
-
 static float meas_data; // temp storage meas value (ctrl task)
+
+power_ac1phase_params_t ac_meas_config;
+power_ac1phase_t pq_power;
 
 /* duty_cycle*/
 static float32_t duty_cycle;// [No unit]
@@ -81,7 +84,6 @@ static const float32_t w0 = 2.0F * PI * f0;   // pulsation [rad/s]
 /* Sinewave settings */
 static float32_t Vgrid_ref; //[V]
 static float32_t Vgrid_amplitude_ref = 0.0F; // [V] 
-static float32_t Vgrid_amplitude_const = 10.0F; // [V]
 static float32_t Vgrid_amplitude = 0.0F; // [V]
 static float angle = 0.F; // [rad]
 //------------- PR RESONANT -------------------------------------
@@ -93,13 +95,13 @@ static float32_t Ts = control_task_period * 1.0e-6F;
 
 // comes from "filters.h"
 LowPassFirstOrderFilter vHighFilter(Ts, 0.1F);
-static uint32_t critical_task_counter;
-static uint32_t decimation;
+static uint32_t critical_task_counter; 
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(512, 9); 
+static ScopeMimicry scope(1024, 10); 
 static bool is_downloading;
+static bool trigger = false;
 //---------------------------------------------------------------
 
 enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
@@ -112,18 +114,11 @@ enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVER
 
 static uint8_t mode = IDLEMODE;
 static uint8_t mode_asked = IDLEMODE;
-static float32_t spying_mode = 0;
+static float32_t spying_mode = 0; 
 static const float32_t MAX_CURRENT = 8.0F;
-static float32_t P_power;
-static float32_t Q_power;
-
-
-
-power_ac1phase_params_t ac_meas_config;
-power_ac1phase_t pq_power;
 
 bool a_trigger() {
-    return (mode == POWERMODE);
+    return trigger;
 }
 
 /**
@@ -144,7 +139,7 @@ void dump_scope_datas(ScopeMimicry &scope)  {
     printk("\n");
     for (uint16_t k=0;k < buffer_size; k++) {
         printk("%08x\n", *((uint32_t *)buffer + k));
-        task.suspendBackgroundUs(200);
+        task.suspendBackgroundUs(100);
     }
     printk("end record\n");
 }
@@ -188,6 +183,7 @@ void setup_routine()
     // Setup the hardware first
     spin.version.setBoardVersion(SPIN_v_1_0);
     twist.setVersion(shield_TWIST_V1_3);
+
     data.enableTwistDefaultChannels();
     // DISABLE DC LOW CAPACITORS
     spin.gpio.configurePin(PC6, OUTPUT);
@@ -203,7 +199,8 @@ void setup_routine()
     scope.connectChannel(duty_cycle, "duty_cycle");
     scope.connectChannel(Vgrid_ref, "Vgrid_ref");
     scope.connectChannel(Vgrid_amplitude, "Vgrid_amplitude");
-    scope.connectChannel(spying_mode, "mode");
+    scope.connectChannel(pq_power.p, "power_p");
+    scope.connectChannel(pq_power.q, "power_q");
     scope.set_delay(0.0F);
     scope.set_trigger(a_trigger);
     scope.start();
@@ -211,9 +208,7 @@ void setup_routine()
     // PR initialisation.
     PrParams params = PrParams(Ts, Kp, Kr, w0, 0.0F, -Udc, Udc);
     prop_res.init(params);
-
-
-    power_ac1phase_init(&ac_meas_config, Vgrid_amplitude_const, w0, Ts);
+    power_ac1phase_init(&ac_meas_config, 10.0, 2.0*PI*50.0, Ts);
 
     /* buck voltage mode */
     twist.initLegBuck(LEG1);
@@ -273,8 +268,12 @@ void loop_communication_task()
             break;
         case 'r':
             is_downloading = true;
+            trigger = false;
             break;
-        default:
+        case 't':
+            trigger = true;
+		break;
+	default:
             break;
         }
     }
@@ -315,10 +314,12 @@ switch (mode) {
     {
         if (!is_downloading) {
             printk("%d:", mode);
-            printk("% 7.3f:", Vgrid_amplitude_ref);
-            printk("% 7.3f:", I1_low_value);
-            printk("% 7.3f:", I2_low_value);
-            printk("% 7.3f:", V1_low_value);
+            printk("% 7.3f:", (double)Vgrid_amplitude_ref);
+            printk("% 7.3f:", (double)I1_low_value);
+            printk("% 7.3f:", (double)I2_low_value);
+            printk("% 7.3f:", (double)V1_low_value);
+            printk("%7.3f:", (double)pq_power.p);
+            printk("%7.3f:", (double)pq_power.q);
             printk("\n");
         } else {
             dump_scope_datas(scope);
@@ -327,12 +328,13 @@ switch (mode) {
     }
     else 
     {
-        printk("%d:", mode);
-        printk("% 6.2f:", Vgrid_amplitude_ref);
-        printk("% 6.2f:", Vgrid_amplitude);
-        printk("% 6.2f:", V1_low_value);
-        printk("% 6.2f:", P_power);
-        printk("% 6.2f:\n", Q_power);
+	    printk("%d:", mode);
+	    printk("% 6.2f:", (double)Vgrid_amplitude_ref);
+	    printk("% 6.2f:", (double)Vgrid_amplitude);
+	    printk("% 6.2f:", (double)V1_low_value);
+	    printk("%7.3f:", (double)pq_power.p);
+	    printk("%7.3f:", (double)pq_power.q);
+        printk("\n");
     }
     task.suspendBackgroundMs(100);
 }
@@ -375,6 +377,7 @@ void loop_critical_task()
         mode = ERRORMODE;
     }
 
+
     if (mode == IDLEMODE || mode == ERRORMODE)
     {
         // FIRST WE STOP THE PWM
@@ -411,12 +414,12 @@ void loop_critical_task()
         pr_value = prop_res.calculateWithReturn(Vgrid_ref, V1_low_value - V2_low_value);
         duty_cycle = pr_value / (2.0F * V_high_filt) + 0.5F; 
         twist.setAllDutyCycle(duty_cycle);
+
         pq_power = power_ac1phase(V1_low_value - V2_low_value, I1_low_value, &ac_meas_config);
 
+
     }
-    if (critical_task_counter%decimation == 0) {
-		P_power = pq_power.p;
-		Q_power = pq_power.q;
+    if (critical_task_counter%3 == 0) {
         spying_mode = (float32_t) mode;
         scope.acquire();
     }
