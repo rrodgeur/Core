@@ -45,7 +45,7 @@
 
 #define DUTY_MIN 0.1F
 #define DUTY_MAX 0.9F
-#define UDC_STARTUP 15.0F
+#define UDC_STARTUP 0.0F
 //--------------SETUP FUNCTIONS DECLARATION-------------------
 void setup_routine(); // Setups the hardware and software of the system
 
@@ -74,7 +74,9 @@ static float meas_data; // temp storage meas value (ctrl task)
 
 power_ac1phase_params_t ac_meas_config;
 power_ac1phase_t pq_power;
-
+float32_t Vnet;
+float32_t virtual_Vgrid_amplitude = 18.0F;
+float32_t Vq;
 /* duty_cycle*/
 static float32_t duty_cycle;// [No unit]
 
@@ -99,7 +101,7 @@ static uint32_t critical_task_counter;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(1024, 10); 
+static ScopeMimicry scope(1024, 11);
 static bool is_downloading;
 static bool trigger = false;
 //---------------------------------------------------------------
@@ -201,6 +203,7 @@ void setup_routine()
     scope.connectChannel(Vgrid_amplitude, "Vgrid_amplitude");
     scope.connectChannel(pq_power.p, "power_p");
     scope.connectChannel(pq_power.q, "power_q");
+    scope.connectChannel(Vq, "Vq");
     scope.set_delay(0.0F);
     scope.set_trigger(a_trigger);
     scope.start();
@@ -408,15 +411,17 @@ void loop_critical_task()
     }
     if (mode == POWERMODE)
     {
+		trigger = true;
         angle = ot_modulo_2pi(angle + w0 * Ts); 
-        Vgrid_amplitude = rate_limiter(Vgrid_amplitude_ref, Vgrid_amplitude, 10.F); 
-        Vgrid_ref = Vgrid_amplitude * ot_sin(angle);
-        pr_value = prop_res.calculateWithReturn(Vgrid_ref, V1_low_value - V2_low_value);
-        duty_cycle = pr_value / (2.0F * V_high_filt) + 0.5F; 
-        twist.setAllDutyCycle(duty_cycle);
-
-        pq_power = power_ac1phase(V1_low_value - V2_low_value, I1_low_value, &ac_meas_config);
-
+		Vnet = virtual_Vgrid_amplitude * ot_sin(angle);
+        pq_power = power_ac1phase(Vnet, I1_low_value, &ac_meas_config);
+		Vq = ac_meas_config.sogi_pll_params.Vdq.q;
+		// if (Vq < sync_power_tolerance && 
+		// 	Vq > -sync_power_tolerance) 
+		// {
+		// 	
+		// }
+        // twist.setAllDutyCycle(duty_cycle);
 
     }
     if (critical_task_counter%3 == 0) {
